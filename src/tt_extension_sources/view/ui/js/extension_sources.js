@@ -322,7 +322,10 @@ let app = new Vue({
     },
     on_reload_result(source_id, success, num_files) {
       let source = this.sources.find(s => s.source_id === source_id);
-      if (source) source.reloading = false;
+      if (source) {
+        source.reloading = false;
+        if (success) source.update_available = false;
+      }
       let message = success
         ? 'Reloaded ' + num_files + ' file' + (num_files === 1 ? '' : 's')
         : 'Reload failed — check Ruby console for details';

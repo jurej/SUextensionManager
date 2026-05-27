@@ -264,6 +264,8 @@ module TT::Plugins::ExtensionSources
     # @param [Integer] source_id
     def mark_reloaded(source_id)
       @file_monitor.mark_reloaded(source_id)
+      source = find_by_source_id(source_id)
+      source.update_available = false if source
     end
 
     # @private
