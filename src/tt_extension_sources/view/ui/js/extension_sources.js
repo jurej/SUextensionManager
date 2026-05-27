@@ -44,17 +44,20 @@ if (typeof sketchup === 'undefined') {
     add_path() { },
     edit_path() { },
     remove_path() { },
-    reload_path() { },
+    reload_path() {
+      console.log('shim: reload_path()')
+      setTimeout(() => app.on_reload_result(2, true, 3), 800);
+    },
     reorder() { },
     source_changed() { },
     ready() {
       console.log('shim: ready()')
       let items = [
-        { source_id: 1, path: '/fake/path1', enabled: true, path_exist: true },
-        { source_id: 2, path: '/fake/path2', enabled: true, path_exist: true },
-        { source_id: 3, path: '/fake/path3', enabled: true, path_exist: true },
-        { source_id: 4, path: '/fake/path4', enabled: true, path_exist: true },
-        { source_id: 5, path: '/fake/path5', enabled: true, path_exist: true },
+        { source_id: 1, path: '/fake/path1', enabled: true, path_exist: true, update_available: false },
+        { source_id: 2, path: '/fake/path2', enabled: true, path_exist: true, update_available: true },
+        { source_id: 3, path: '/fake/path3', enabled: true, path_exist: true, update_available: false },
+        { source_id: 4, path: '/fake/path4', enabled: true, path_exist: true, update_available: false },
+        { source_id: 5, path: '/fake/path5', enabled: true, path_exist: true, update_available: false },
       ];
       setTimeout(() => app.update(items)); // Simulate async action.
     },
@@ -70,6 +73,13 @@ let app = new Vue({
     last_selected_index: null,
     drag_over_source_id: null,
     drag_before: false,
+    // Toast notification state:
+    toast: {
+      visible: false,
+      success: true,
+      message: '',
+      timer: null,
+    },
   },
   computed: {
     is_filtered() {
@@ -118,6 +128,7 @@ let app = new Vue({
         // item.draggable = ui_state[item.source_id]?.draggable || false;
         item.selected = (item.source_id in ui_state) ? ui_state[item.source_id].selected : false;
         item.draggable = (item.source_id in ui_state) ? ui_state[item.source_id].draggable : false;
+        item.reloading = false;
       }
       this.sources = sources;
     },
@@ -305,7 +316,26 @@ let app = new Vue({
       sketchup.remove_path(source_id);
     },
     reload_path(source_id) {
+      let source = this.sources.find(s => s.source_id === source_id);
+      if (source) source.reloading = true;
       sketchup.reload_path(source_id);
+    },
+    on_reload_result(source_id, success, num_files) {
+      let source = this.sources.find(s => s.source_id === source_id);
+      if (source) source.reloading = false;
+      let message = success
+        ? 'Reloaded ' + num_files + ' file' + (num_files === 1 ? '' : 's')
+        : 'Reload failed — check Ruby console for details';
+      this.show_toast(success, message);
+    },
+    show_toast(success, message) {
+      if (this.toast.timer) clearTimeout(this.toast.timer);
+      this.toast.success = success;
+      this.toast.message = message;
+      this.toast.visible = true;
+      if (success) {
+        this.toast.timer = setTimeout(() => { this.toast.visible = false; }, 3000);
+      }
     },
     on_source_changed(source_id, changes) {
       console.log('on_source_changed', source_id, changes);

@@ -29,6 +29,13 @@ module TT::Plugins::ExtensionSources
       call_js('app.update', sources)
     end
 
+    # @param [Integer] source_id
+    # @param [Boolean] success
+    # @param [Integer] num_files
+    def notify_reload_result(source_id, success, num_files: 0)
+      call_js('app.on_reload_result', source_id, success, num_files)
+    end
+
     private
 
     # @return [UI::HtmlDialog]

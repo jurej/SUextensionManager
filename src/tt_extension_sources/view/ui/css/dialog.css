@@ -99,3 +99,67 @@ body,
 .es-drag-over.es-drag-after:after {
   bottom: -1px;
 }
+
+/* *** Reloading Spinner *** */
+
+@keyframes es-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.es-reloading .modus-icons {
+  display: inline-block;
+  animation: es-spin 0.8s linear infinite;
+  color: #6c757d !important;
+}
+
+/* *** Toast Notification *** */
+
+.es-toast {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  border-bottom: 1px solid transparent;
+}
+
+.es-toast-success {
+  background-color: #dff0d8;
+  border-bottom-color: #c3e6cb;
+  color: #285b2a;
+}
+
+.es-toast-error {
+  background-color: #f8d7da;
+  border-bottom-color: #f5c6cb;
+  color: #721c24;
+}
+
+.es-toast-icon {
+  font-size: 16px !important;
+  flex-shrink: 0;
+}
+
+/* *** Update Available Indicator *** */
+
+.es-update-available .modus-icons {
+  color: #e46325 !important;
+}
+
+.es-update-available {
+  position: relative;
+}
+
+.es-update-available::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  background-color: #e46325;
+  border-radius: 50%;
+  border: 1px solid #f1f1f6;
+}

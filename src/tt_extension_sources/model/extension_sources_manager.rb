@@ -5,6 +5,7 @@ require 'observer'
 
 require 'tt_extension_sources/model/extension_source'
 require 'tt_extension_sources/model/version'
+require 'tt_extension_sources/system/file_system_monitor'
 require 'tt_extension_sources/utils/inspection'
 require 'tt_extension_sources/utils/timing'
 
@@ -36,6 +37,8 @@ module TT::Plugins::ExtensionSources
       @load_path = load_path
       @storage_path = storage_path
       @metadata = metadata
+      @file_monitor = FileSystemMonitor.new(logger: @logger)
+      @file_monitor.add_observer(self, :on_file_changed)
       # TODO: Parse startup args:
       # "Config=${input:buildType};Path=${workspaceRoot}/ruby"
       #
@@ -62,6 +65,7 @@ module TT::Plugins::ExtensionSources
       end
 
       source.add_observer(self, :on_source_changed)
+      @file_monitor.track(source.source_id, source.path)
 
       changed
       notify_observers(self, :added, source)
@@ -79,6 +83,7 @@ module TT::Plugins::ExtensionSources
       remove_load_path(source.path)
 
       source.delete_observer(self)
+      @file_monitor.untrack(source.source_id)
 
       changed
       notify_observers(self, :removed, source)
@@ -241,6 +246,24 @@ module TT::Plugins::ExtensionSources
       @logger.debug { "#{self.class.object_name} on_source_changed: ##{source ? source.source_id : nil}: #{source ? source.path : nil}" }
       changed
       notify_observers(self, :changed, source)
+    end
+
+    # Handle file change notifications from FileSystemMonitor.
+    #
+    # @param [Integer] source_id
+    def on_file_changed(source_id)
+      @logger.debug { "#{self.class.object_name} on_file_changed: ##{source_id}" }
+      source = find_by_source_id(source_id)
+      return if source.nil?
+
+      source.update_available = true
+    end
+
+    # Mark a source as reloaded, resetting the update available flag.
+    #
+    # @param [Integer] source_id
+    def mark_reloaded(source_id)
+      @file_monitor.mark_reloaded(source_id)
     end
 
     # @private

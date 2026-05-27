@@ -31,6 +31,7 @@ module TT::Plugins::ExtensionSources
       @source_id = self.class.generate_source_id
       @path = path
       @enabled = enabled
+      @update_available = false
     end
 
     def path_exist?
@@ -65,6 +66,18 @@ module TT::Plugins::ExtensionSources
       notify_observers(:enabled, self)
     end
 
+    # @return [Boolean]
+    def update_available?
+      @update_available
+    end
+
+    # @param [Boolean] value
+    def update_available=(value)
+      @update_available = value
+      changed
+      notify_observers(:update_available, self)
+    end
+
     # @return [Hash]
     def to_hash
       {
@@ -72,6 +85,7 @@ module TT::Plugins::ExtensionSources
         path_exist: path_exist?,
         path: path,
         enabled: enabled?,
+        update_available: update_available?,
       }
     end
 

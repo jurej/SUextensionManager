@@ -169,11 +169,15 @@ module TT::Plugins::ExtensionSources
         }.size
       rescue Exception => error
         SKETCHUP_CONSOLE.show
+        dialog.notify_reload_result(source_id, false)
         raise
       ensure
         $VERBOSE = original_verbose
       end
       @logger.info { "#{self.class.object_name} > Reloaded #{num_files} files" }
+
+      extension_sources_manager.mark_reloaded(source_id)
+      dialog.notify_reload_result(source_id, true, num_files: num_files)
     end
 
     # @param [ExtensionSourcesDialog] dialog

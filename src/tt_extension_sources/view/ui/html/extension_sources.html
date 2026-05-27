@@ -64,6 +64,12 @@
             </div>
           </div>
         </div>
+        <!-- Toast notification -->
+        <div v-if="toast.visible" class="es-toast"
+          v-bind:class="{ 'es-toast-success': toast.success, 'es-toast-error': !toast.success }">
+          <i class="modus-icons es-toast-icon">{{ toast.success ? 'check_circle' : 'error_outline' }}</i>
+          <span>{{ toast.message }}</span>
+        </div>
         <!-- Content (List) -->
         <div class="modus-content-columns">
           <div class="modus-content">
@@ -99,9 +105,11 @@
                   </div>
                   <!-- Buttons -->
                   <div class="text-nowrap" v-on:mousedown.prevent.stop="">
-                    <button class="btn btn-text-dark btn-ms btn-icon-only" title="Reload"
+                    <button class="btn btn-text-dark btn-ms btn-icon-only"
+                      v-bind:class="{ 'es-update-available': source.update_available, 'es-reloading': source.reloading }"
+                      v-bind:title="source.reloading ? 'Reloading…' : source.update_available ? 'Update available - Click to reload' : 'Reload'"
                       v-on:click="reload_path(source.source_id)"
-                      v-bind:disabled="!source.enabled || !source.path_exist">
+                      v-bind:disabled="!source.enabled || !source.path_exist || source.reloading">
                       <i class="modus-icons">refresh</i>
                     </button>
                     <button class="btn btn-text-dark btn-ms btn-icon-only" title="Edit"

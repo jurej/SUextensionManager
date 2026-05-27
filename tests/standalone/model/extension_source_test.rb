@@ -117,6 +117,7 @@ module TT::Plugins::ExtensionSources
         path_exist: source.path_exist?,
         path: source.path,
         enabled: source.enabled?,
+        update_available: source.update_available?,
       }
       assert_equal(expected, result)
     end
@@ -145,6 +146,7 @@ module TT::Plugins::ExtensionSources
         path_exist: source.path_exist?,
         path: source.path,
         enabled: source.enabled?,
+        update_available: source.update_available?,
       }
       assert_equal(expected, result)
     end
@@ -160,6 +162,7 @@ module TT::Plugins::ExtensionSources
         path_exist: source.path_exist?,
         path: source.path,
         enabled: source.enabled?,
+        update_available: source.update_available?,
       }
       assert_equal(expected.to_json, result)
     end

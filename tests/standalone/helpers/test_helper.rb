@@ -46,3 +46,15 @@ module TT
     end
   end
 end
+
+# Mock UI module for testing outside SketchUp.
+module UI
+  def self.start_timer(interval, repeat = false, &block)
+    # Return a mock timer ID
+    Object.new
+  end
+
+  def self.stop_timer(timer_id)
+    # No-op in test environment
+  end
+end
