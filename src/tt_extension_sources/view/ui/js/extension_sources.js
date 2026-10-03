@@ -76,7 +76,7 @@ let app = new Vue({
     // Toast notification state:
     toast: {
       visible: false,
-      success: true,
+      kind: 'success', // 'success' | 'error' | 'warning'
       message: '',
       timer: null,
     },
@@ -102,6 +102,14 @@ let app = new Vue({
       return this.sources.filter((source) => {
         return source.selected;
       });
+    },
+    toast_icon() {
+      const icons = {
+        success: 'check_circle',
+        error: 'error_outline',
+        warning: 'warning',
+      };
+      return icons[this.toast.kind] || 'info';
     },
   },
   methods: {
@@ -320,6 +328,32 @@ let app = new Vue({
       if (source) source.reloading = true;
       sketchup.reload_path(source_id);
     },
+    on_load_result(source_id, result) {
+      let source = this.sources.find(s => s.source_id === source_id);
+      if (source) source.enabled = true;
+      let kind = 'success';
+      let message = 'Source enabled.';
+      if (result.conflicts.length) {
+        kind = 'warning';
+        message = 'Source enabled, but ' + result.conflicts.join(', ')
+          + ' was already loaded from another path. Disable the other version and restart SketchUp.';
+      } else if (result.failed.length) {
+        kind = 'warning';
+        message = 'Source enabled, but failed to load: ' + result.failed.join(', ') + '.';
+      } else if (result.stale) {
+        kind = 'warning';
+        message = 'Source enabled - previously loaded code is still active, restart SketchUp to fully apply.';
+      }
+      this.show_toast(kind, message);
+    },
+    on_unload_result(source_id, restart_required) {
+      let source = this.sources.find(s => s.source_id === source_id);
+      if (source) source.enabled = false;
+      let message = restart_required
+        ? 'Extension unloaded - SketchUp restart required for it to fully take effect.'
+        : 'Extension unloaded.';
+      this.show_toast(restart_required ? 'warning' : 'success', message);
+    },
     on_reload_result(source_id, success, num_files) {
       let source = this.sources.find(s => s.source_id === source_id);
       if (source) {
@@ -329,14 +363,14 @@ let app = new Vue({
       let message = success
         ? 'Reloaded ' + num_files + ' file' + (num_files === 1 ? '' : 's')
         : 'Reload failed — check Ruby console for details';
-      this.show_toast(success, message);
+      this.show_toast(success ? 'success' : 'error', message);
     },
-    show_toast(success, message) {
+    show_toast(kind, message) {
       if (this.toast.timer) clearTimeout(this.toast.timer);
-      this.toast.success = success;
+      this.toast.kind = kind;
       this.toast.message = message;
       this.toast.visible = true;
-      if (success) {
+      if (kind === 'success') {
         this.toast.timer = setTimeout(() => { this.toast.visible = false; }, 3000);
       }
     },

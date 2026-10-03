@@ -36,6 +36,18 @@ module TT::Plugins::ExtensionSources
       call_js('app.on_reload_result', source_id, success, num_files)
     end
 
+    # @param [Integer] source_id
+    # @param [Hash] result
+    def notify_load_result(source_id, result)
+      call_js('app.on_load_result', source_id, result)
+    end
+
+    # @param [Integer] source_id
+    # @param [Boolean] restart_required
+    def notify_unload_result(source_id, restart_required)
+      call_js('app.on_unload_result', source_id, restart_required)
+    end
+
     private
 
     # @return [UI::HtmlDialog]

@@ -1,8 +1,10 @@
 require 'minitest/autorun'
 require 'test_helper'
 
+require 'fileutils'
 require 'json'
 require 'tempfile'
+require 'tmpdir'
 
 require 'tt_extension_sources/model/extension_sources_manager'
 require 'tt_extension_sources/model/extension_source'
@@ -214,6 +216,315 @@ module TT::Plugins::ExtensionSources
 
       assert_raises(IndexError) do
         manager.remove(123456)
+      end
+    end
+
+
+    def test_unload
+      manager = ExtensionSourcesManager.new(
+        load_path: @load_path,
+        loaded_features: [],
+        storage_path: @storage_path.path,
+        warnings: false,
+      )
+      path = '/fake/path'
+      source = manager.add(path, enabled: true)
+
+      restart_required = assert_observer_event(manager, :changed, [manager, :changed, ExtensionSource]) do
+        manager.unload(source.source_id)
+      end
+      assert_equal(false, restart_required)
+      assert_kind_of(FalseClass, source.enabled?)
+      # Source should still be listed, but not in the load path.
+      assert(manager.include_path?(path))
+      refute(@load_path.include?(path))
+    end
+
+    def test_unload_invalid_source_id
+      manager = ExtensionSourcesManager.new(
+        load_path: @load_path,
+        loaded_features: [],
+        storage_path: @storage_path.path,
+        warnings: false,
+      )
+      path = '/fake/path'
+      manager.add(path, enabled: true)
+
+      assert_raises(IndexError) do
+        manager.unload(123456)
+      end
+    end
+
+    def test_unload_loaded_source_requires_restart
+      path = '/fake/path'
+      loaded_features = [
+        '/fake/path/hello.rb',
+        '/other/source/world.rb',
+      ]
+      manager = ExtensionSourcesManager.new(
+        load_path: @load_path,
+        loaded_features: loaded_features,
+        storage_path: @storage_path.path,
+        warnings: false,
+      )
+      source = manager.add(path, enabled: true)
+
+      assert_equal(true, manager.unload(source.source_id))
+      assert_kind_of(FalseClass, source.enabled?)
+      refute(@load_path.include?(path))
+      # Files from the source should be purged from the loaded features.
+      assert_equal(['/other/source/world.rb'], loaded_features)
+    end
+
+    def test_unload_similar_prefix_path_not_loaded
+      # The loaded file is under a directory which shares a common prefix with
+      # the source path, but it isn't part of the source.
+      path = '/fake/path'
+      loaded_features = [
+        '/fake/pathology/hello.rb',
+      ]
+      manager = ExtensionSourcesManager.new(
+        load_path: @load_path,
+        loaded_features: loaded_features,
+        storage_path: @storage_path.path,
+        warnings: false,
+      )
+      source = manager.add(path, enabled: true)
+
+      assert_equal(false, manager.unload(source.source_id))
+    end
+
+    def test_unload_disabled_source
+      manager = ExtensionSourcesManager.new(
+        load_path: @load_path,
+        loaded_features: [],
+        storage_path: @storage_path.path,
+        warnings: false,
+      )
+      path = '/fake/path'
+      source = manager.add(path, enabled: false)
+
+      restart_required = assert_no_observer_event(manager) do
+        manager.unload(source.source_id)
+      end
+      assert_equal(false, restart_required)
+      assert_kind_of(FalseClass, source.enabled?)
+    end
+
+    def test_unload_unchecks_registered_extensions
+      Dir.mktmpdir do |dir|
+        extension = Minitest::Mock.new
+        2.times { extension.expect(:extension_path, File.join(dir, 'hello.rb')) }
+        extension.expect(:uncheck, nil)
+
+        other_extension = Minitest::Mock.new
+        2.times { other_extension.expect(:extension_path, '/other/source/world.rb') }
+        other_extension.refuse(:uncheck)
+
+        manager = ExtensionSourcesManager.new(
+          load_path: @load_path,
+          loaded_features: [],
+          extensions: [extension, other_extension],
+          storage_path: @storage_path.path,
+          warnings: false,
+        )
+        source = manager.add(dir, enabled: true)
+
+        assert_equal(false, manager.unload(source.source_id))
+        assert_mock(extension)
+        assert_mock(other_extension)
+      end
+    end
+
+    def test_unload_ignores_extensions_without_extension_path
+      # `SketchupExtension#extension_path` isn't available in older SketchUp
+      # versions. Such extensions are skipped.
+      Dir.mktmpdir do |dir|
+        extension = Minitest::Mock.new
+        extension.refuse(:uncheck)
+
+        manager = ExtensionSourcesManager.new(
+          load_path: @load_path,
+          loaded_features: [],
+          extensions: [extension],
+          storage_path: @storage_path.path,
+          warnings: false,
+        )
+        source = manager.add(dir, enabled: true)
+
+        assert_equal(false, manager.unload(source.source_id))
+        assert_mock(extension)
+      end
+    end
+
+
+    def test_load
+      manager = ExtensionSourcesManager.new(
+        load_path: @load_path,
+        loaded_features: [],
+        storage_path: @storage_path.path,
+        warnings: false,
+      )
+      path = '/fake/path'
+      source = manager.add(path, enabled: false)
+
+      result = assert_observer_event(manager, :changed, [manager, :changed, ExtensionSource]) do
+        manager.load(source.source_id)
+      end
+      assert_equal(false, result[:stale])
+      assert_kind_of(TrueClass, source.enabled?)
+      assert(@load_path.include?(path))
+    end
+
+    def test_load_invalid_source_id
+      manager = ExtensionSourcesManager.new(
+        load_path: @load_path,
+        loaded_features: [],
+        storage_path: @storage_path.path,
+        warnings: false,
+      )
+      manager.add('/fake/path', enabled: false)
+
+      assert_raises(IndexError) do
+        manager.load(123456)
+      end
+    end
+
+    def test_load_requires_source_files
+      Dir.mktmpdir do |dir|
+        file = File.join(dir, 'hello.rb')
+        FileUtils.touch(file)
+
+        manager = ExtensionSourcesManager.new(
+          load_path: @load_path,
+          loaded_features: [],
+          storage_path: @storage_path.path,
+          warnings: false,
+        )
+        source = manager.add(dir, enabled: false)
+
+        Sketchup.required_files.clear
+        manager.load(source.source_id)
+        assert_equal([file], Sketchup.required_files)
+      end
+    end
+
+    def test_load_stale_code_detected
+      path = '/fake/path'
+      loaded_features = ['/fake/path/hello.rb']
+      manager = ExtensionSourcesManager.new(
+        load_path: @load_path,
+        loaded_features: loaded_features,
+        storage_path: @storage_path.path,
+        warnings: false,
+      )
+      source = manager.add(path, enabled: false)
+
+      assert_equal(true, manager.load(source.source_id)[:stale])
+      assert_kind_of(TrueClass, source.enabled?)
+      assert(@load_path.include?(path))
+      # Loading doesn't purge loaded features.
+      assert_equal(['/fake/path/hello.rb'], loaded_features)
+    end
+
+    def test_load_checks_registered_extensions
+      Dir.mktmpdir do |dir|
+        FileUtils.touch(File.join(dir, 'hello.rb'))
+        FileUtils.mkdir_p(File.join(dir, 'hello'))
+        FileUtils.touch(File.join(dir, 'hello', 'main.rb'))
+
+        extension = Minitest::Mock.new
+        2.times { extension.expect(:extension_path, File.join(dir, 'hello.rb')) }
+        extension.expect(:check, nil)
+
+        other_extension = Minitest::Mock.new
+        2.times { other_extension.expect(:extension_path, '/other/source/world.rb') }
+        other_extension.refuse(:check)
+
+        manager = ExtensionSourcesManager.new(
+          load_path: @load_path,
+          loaded_features: [],
+          extensions: [extension, other_extension],
+          storage_path: @storage_path.path,
+          warnings: false,
+        )
+        source = manager.add(dir, enabled: false)
+
+        assert_equal(false, manager.load(source.source_id)[:stale])
+        assert_mock(extension)
+        assert_mock(other_extension)
+      end
+    end
+
+    def test_load_skips_loader_conflicting_with_registered_extension
+      Dir.mktmpdir do |dir|
+        FileUtils.touch(File.join(dir, '5d_plus.rb'))
+
+        extension = Minitest::Mock.new
+        2.times { extension.expect(:extension_path, '/other/version/5d_plus.rb') }
+
+        manager = ExtensionSourcesManager.new(
+          load_path: @load_path,
+          loaded_features: [],
+          extensions: [extension],
+          storage_path: @storage_path.path,
+          warnings: false,
+        )
+        source = manager.add(dir, enabled: false)
+
+        Sketchup.required_files.clear
+        result = manager.load(source.source_id)
+
+        assert_equal(['5d_plus.rb'], result[:conflicts])
+        assert_empty(Sketchup.required_files)
+        assert_kind_of(TrueClass, source.enabled?)
+        assert_mock(extension)
+      end
+    end
+
+    def test_load_skips_loader_conflicting_with_enabled_source
+      Dir.mktmpdir do |dir_a|
+        Dir.mktmpdir do |dir_b|
+          FileUtils.touch(File.join(dir_a, 'same.rb'))
+          FileUtils.touch(File.join(dir_b, 'same.rb'))
+
+          manager = ExtensionSourcesManager.new(
+            load_path: @load_path,
+            loaded_features: [],
+            storage_path: @storage_path.path,
+            warnings: false,
+          )
+          manager.add(dir_a, enabled: true)
+          source = manager.add(dir_b, enabled: false)
+
+          Sketchup.required_files.clear
+          result = manager.load(source.source_id)
+
+          assert_equal(['same.rb'], result[:conflicts])
+          assert_empty(Sketchup.required_files)
+        end
+      end
+    end
+
+    def test_load_reports_failed_files
+      Dir.mktmpdir do |dir|
+        file = File.join(dir, 'hello.rb')
+        FileUtils.touch(file)
+
+        manager = ExtensionSourcesManager.new(
+          load_path: @load_path,
+          loaded_features: [],
+          storage_path: @storage_path.path,
+          warnings: false,
+        )
+        source = manager.add(dir, enabled: false)
+
+        Sketchup.required_files.clear
+        Sketchup.failed_required_files << file
+        result = manager.load(source.source_id)
+        Sketchup.failed_required_files.clear
+
+        assert_equal(['hello.rb'], result[:failed])
       end
     end
 

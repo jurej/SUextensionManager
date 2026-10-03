@@ -138,6 +138,12 @@ body,
   color: #721c24;
 }
 
+.es-toast-warning {
+  background-color: #fff3cd;
+  border-bottom-color: #ffeeba;
+  color: #856404;
+}
+
 .es-toast-icon {
   font-size: 1rem !important;
   flex-shrink: 0;

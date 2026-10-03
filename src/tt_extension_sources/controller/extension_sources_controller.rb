@@ -83,7 +83,11 @@ module TT::Plugins::ExtensionSources
       path = UI.select_directory(title: "Select Extension Source Directory")
       return if path.nil?
 
-      extension_sources_manager.add(path)
+      source = extension_sources_manager.add(path, enabled: false)
+      return if source.nil?
+
+      result = extension_sources_manager.load(source.source_id)
+      dialog.notify_load_result(source.source_id, result)
     end
 
     # @param [ExtensionSourcesDialog] dialog
@@ -131,7 +135,24 @@ module TT::Plugins::ExtensionSources
     # @param [Integer] source_id
     # @param [Hash{String => Object}] changes
     def source_changed(dialog, source_id, changes)
-      extension_sources_manager.update(source_id: source_id, **changes)
+      # Changes arriving via the `source_changed` callback haven't been
+      # symbolized by the dialog.
+      changes = Hash[changes.map { |key, value| [key.to_sym, value] }]
+      if changes.key?(:enabled)
+        enabled = changes.delete(:enabled)
+        unless changes.empty?
+          extension_sources_manager.update(source_id: source_id, **changes)
+        end
+        if enabled
+          result = extension_sources_manager.load(source_id)
+          dialog.notify_load_result(source_id, result)
+        else
+          restart_required = extension_sources_manager.unload(source_id)
+          dialog.notify_unload_result(source_id, restart_required)
+        end
+      else
+        extension_sources_manager.update(source_id: source_id, **changes)
+      end
     end
 
     # @param [ExtensionSourcesDialog] dialog

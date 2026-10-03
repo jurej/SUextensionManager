@@ -66,8 +66,8 @@
         </div>
         <!-- Toast notification -->
         <div v-if="toast.visible" class="es-toast"
-          v-bind:class="{ 'es-toast-success': toast.success, 'es-toast-error': !toast.success }">
-          <i class="modus-icons es-toast-icon">{{ toast.success ? 'check_circle' : 'error_outline' }}</i>
+          v-bind:class="'es-toast-' + toast.kind">
+          <i class="modus-icons es-toast-icon">{{ toast_icon }}</i>
           <span>{{ toast.message }}</span>
         </div>
         <!-- Content (List) -->

@@ -27,14 +27,18 @@ module TT::Plugins::ExtensionSources
 
     # @param [String] storage_path Full path to JSON file to serialize data to.
     # @param [Array] load_path
+    # @param [Array] loaded_features
+    # @param [Array<SketchupExtension>, nil] extensions
     # @param [Hash] metadata Additional data to include when serializing to file.
     # @param [Logger] logger
     # @param [Boolean] warnings
-    def initialize(storage_path:, load_path: $LOAD_PATH, metadata: {},
-        logger: Logger.new(nil), warnings: true)
+    def initialize(storage_path:, load_path: $LOAD_PATH, loaded_features: $LOADED_FEATURES,
+        extensions: nil, metadata: {}, logger: Logger.new(nil), warnings: true)
       @warnings = warnings
       @logger = logger
       @load_path = load_path
+      @loaded_features = loaded_features
+      @extensions = extensions
       @storage_path = storage_path
       @metadata = metadata
       @file_monitor = FileSystemMonitor.new(logger: @logger)
@@ -61,7 +65,13 @@ module TT::Plugins::ExtensionSources
 
       if source.enabled?
         add_load_path(source.path)
-        require_sources(source.path)
+        conflicts = conflicting_loaders(source)
+        unless conflicts.empty?
+          @logger.warn {
+            "#{self.class.object_name} skipped conflicting loader(s): #{conflicts.inspect}"
+          }
+        end
+        require_sources(source.path, exclude: conflicts)
       end
 
       source.add_observer(self, :on_source_changed)
@@ -89,6 +99,69 @@ module TT::Plugins::ExtensionSources
       notify_observers(self, :removed, source)
 
       source
+    end
+
+    # Unloads the extension source. The source is disabled so it won't be
+    # loaded next time SketchUp starts, and any `SketchupExtension` registered
+    # from the source is unchecked so it doesn't load on start. Files loaded
+    # from the source are also purged from `$LOADED_FEATURES` so they can be
+    # required again.
+    #
+    # Note that Ruby code cannot be removed from the interpreter once loaded.
+    # If files from the source has been loaded a SketchUp restart is required
+    # for the unload to fully take effect.
+    #
+    # @param [Integer] source_id
+    # @return [Boolean] `true` if a SketchUp restart is required.
+    def unload(source_id)
+      source = find_by_source_id(source_id)
+      raise IndexError, "source id #{source_id} not found" unless source
+
+      restart_required = loaded?(source)
+      registered_extensions(source).each { |extension|
+        @logger.debug { "#{self.class.object_name} unchecking extension: #{extension.inspect}" }
+        extension.uncheck
+      }
+      update(source_id: source_id, enabled: false)
+      purge_loaded_features(source)
+      restart_required
+    end
+
+    # Loads the extension source. The source is enabled, its path is added to
+    # the load path, its Ruby files are required and any `SketchupExtension`
+    # registered from the source is checked.
+    #
+    # Loader files conflicting with loaders loaded or registered from another
+    # path are skipped, as SketchUp refuses to load them. Enabling the source
+    # still applies so it can be loaded when SketchUp is restarted.
+    #
+    # @param [Integer] source_id
+    # @return [Hash]
+    # @option result [Boolean] :stale `true` if code previously loaded from
+    #   the source is still resident in the interpreter (a SketchUp restart is
+    #   recommended for a clean load).
+    # @option result [Array<String>] :conflicts basenames of loader files
+    #   skipped because a loader with the same name was already loaded from
+    #   another path (a SketchUp restart is required to switch versions).
+    # @option result [Array<String>] :failed basenames of files that failed
+    #   to load.
+    def load(source_id)
+      source = find_by_source_id(source_id)
+      raise IndexError, "source id #{source_id} not found" unless source
+
+      stale_code = loaded?(source)
+      conflicts = conflicting_loaders(source)
+      update(source_id: source_id, enabled: true)
+      failed = require_sources(source.path, exclude: conflicts)
+      registered_extensions(source).each { |extension|
+        @logger.debug { "#{self.class.object_name} checking extension: #{extension.inspect}" }
+        extension.check
+      }
+      {
+        stale: stale_code,
+        conflicts: conflicts.map { |path| File.basename(path) },
+        failed: failed.map { |path| File.basename(path) },
+      }
     end
 
     # Updates properties of the given source path.
@@ -125,7 +198,7 @@ module TT::Plugins::ExtensionSources
         source.path = path
         if source.enabled?
           add_load_path(source.path)
-          require_sources(source.path)
+          require_sources(source.path, exclude: conflicting_loaders(source))
         end
       end
 
@@ -347,22 +420,121 @@ module TT::Plugins::ExtensionSources
 
     private
 
+    # @param [ExtensionSource] source
+    # @return [Boolean] `true` if files from the source has been loaded into
+    #   the Ruby interpreter.
+    def loaded?(source)
+      dir = source_directory(source.path)
+      @loaded_features.any? { |file| file_in_directory?(file, dir) }
+    end
+
+    # Removes files loaded from the source path from the list of loaded
+    # features, allowing them to be `require`d again.
+    #
+    # @param [ExtensionSource] source
+    def purge_loaded_features(source)
+      dir = source_directory(source.path)
+      @loaded_features.delete_if { |file| file_in_directory?(file, dir) }
+    end
+
+    # @param [String] file
+    # @param [String] dir Normalized absolute path with a trailing file
+    #   separator. (See {#source_directory}.)
+    # @return [Boolean]
+    def file_in_directory?(file, dir)
+      normalize_path(File.expand_path(file)).start_with?(dir)
+    end
+
+    # @param [ExtensionSource] source
+    # @return [Array<SketchupExtension>] extensions registered from the source.
+    def registered_extensions(source)
+      dir = source_directory(source.path)
+      sketchup_extensions.select { |extension|
+        # `SketchupExtension#extension_path` was added in SketchUp 2021.
+        next false unless extension.respond_to?(:extension_path)
+
+        extension_path = extension.extension_path
+        next false if extension_path.nil? || extension_path.empty?
+
+        file_in_directory?(extension_path, dir)
+      }
+    end
+
+    # @return [Array<SketchupExtension>]
+    def sketchup_extensions
+      return @extensions unless @extensions.nil?
+      defined?(Sketchup) ? Sketchup.extensions : []
+    end
+
+    # @param [String] path
+    # @return [String] Normalized absolute path with a trailing file separator.
+    def source_directory(path)
+      dir = normalize_path(File.expand_path(path))
+      dir.end_with?('/') ? dir : "#{dir}/"
+    end
+
+    # @param [String] path
+    # @return [String]
+    def normalize_path(path)
+      path = path.tr('\\', '/')
+      # `File::ALT_SEPARATOR` is '\\' on Windows, where the file system is
+      # case insensitive.
+      path = path.downcase if File::ALT_SEPARATOR
+      path
+    end
+
     # @return [Hash]
     def serialize_as_hash
       @data.map(&:serialize_as_hash)
     end
 
-    # @param [String] source_path
+    # Returns the `.rb` files in the source that SketchUp cannot load because
+    # a file with the same basename was already loaded or registered as an
+    # extension loader file from a different path, or exists as a loader in
+    # another enabled source. SketchUp tracks loader files by basename, so a
+    # second version of the same extension cannot be loaded until SketchUp is
+    # restarted.
+    #
+    # @param [ExtensionSource] source
     # @return [Array<String>]
-    def require_sources(source_path)
+    def conflicting_loaders(source)
+      dir = source_directory(source.path)
+      basenames = []
+      sketchup_extensions.each { |extension|
+        # `SketchupExtension#extension_path` was added in SketchUp 2021.
+        next unless extension.respond_to?(:extension_path)
+
+        extension_path = extension.extension_path
+        next if extension_path.nil? || extension_path.empty?
+        next if file_in_directory?(extension_path, dir)
+
+        basenames << File.basename(extension_path).downcase
+      }
+      @data.each { |item|
+        next if item.equal?(source) || !item.enabled?
+
+        basenames.concat(Dir.glob("#{item.path}/*.rb").map { |path|
+          File.basename(path).downcase
+        })
+      }
+      Dir.glob("#{source.path}/*.rb").select { |path|
+        basenames.include?(File.basename(path).downcase)
+      }
+    end
+
+    # @param [String] source_path
+    # @param [Array<String>] exclude Paths to skip, e.g. loader files that
+    #   SketchUp refuses to load because a loader with the same basename was
+    #   already loaded.
+    # @return [Array<String>] paths that failed to load.
+    def require_sources(source_path, exclude: [])
       pattern = "#{source_path}/*.rb"
-      Dir.glob(pattern).each { |path|
-        # `Sketchup.require` doesn't throw errors when failing to load a file.
-        # So there's no need to disable the error handler.
-        # Would have been useful to know if the method failed or not, but at the
-        # moment that's not possible to detect.
-        Sketchup.require(path)
-      }.to_a
+      (Dir.glob(pattern) - exclude).each_with_object([]) { |path, failed|
+        # `Sketchup.require` doesn't throw errors when failing to load a file,
+        # it returns `false` instead. Collect the failures so they can be
+        # reported.
+        failed << path unless Sketchup.require(path)
+      }
     end
 
     # @param [String] source_path
